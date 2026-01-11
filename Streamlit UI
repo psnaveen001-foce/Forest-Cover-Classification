@@ -1,0 +1,130 @@
+!pip install -q streamlit
+!wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+!chmod +x cloudflared-linux-amd64
+import subprocess
+subprocess.Popen(["./cloudflared-linux-amd64", "tunnel", "--url", "http://localhost:8501"])
+!nohup /content/cloudflared-linux-amd64 tunnel --url http://localhost:8501 &
+
+%%writefile app.py
+
+import streamlit as st
+import numpy as np
+import joblib
+import pandas as pd
+
+# -------------------------------
+# Page Configuration
+# -------------------------------
+st.set_page_config(
+    page_title="Forest Cover Type Prediction",
+    page_icon="🌲",
+    layout="wide"
+)
+
+# -------------------------------
+# Load Model Artifacts
+# -------------------------------
+model = joblib.load("models/xgboost_model.pkl")
+scaler = joblib.load("models/scaler.pkl")
+label_encoder = joblib.load("models/cover_type_encoder.pkl")
+
+# -------------------------------
+# Title & Description
+# -------------------------------
+st.title("🌲 Forest Cover Type Classification System")
+st.markdown(
+    """
+    This application predicts the **forest cover type** using environmental and cartographic features.  
+    The model is a **tuned XGBoost classifier** trained with proper preprocessing and class balancing.
+    """
+)
+
+# -------------------------------
+# Sidebar Inputs
+# -------------------------------
+st.sidebar.header("📥 Input Environmental Features")
+
+elevation = st.sidebar.number_input("Elevation (m)", 0, 5000, 2500)
+aspect = st.sidebar.number_input("Aspect (degrees)", 0, 360, 180)
+slope = st.sidebar.number_input("Slope (degrees)", 0, 60, 15)
+
+h_dist_hydro = st.sidebar.number_input(
+    "Horizontal Distance to Hydrology (m)", 0, 10000, 100
+)
+v_dist_hydro = st.sidebar.number_input(
+    "Vertical Distance to Hydrology (m)", -1000, 1000, 0
+)
+h_dist_road = st.sidebar.number_input(
+    "Horizontal Distance to Roadways (m)", 0, 20000, 500
+)
+
+hillshade_9am = st.sidebar.number_input("Hillshade at 9 AM", 0, 255, 200)
+hillshade_noon = st.sidebar.number_input("Hillshade at Noon", 0, 255, 220)
+hillshade_3pm = st.sidebar.number_input("Hillshade at 3 PM", 0, 255, 180)
+
+h_dist_fire = st.sidebar.number_input(
+    "Horizontal Distance to Fire Points (m)", 0, 20000, 1000
+)
+
+wilderness_area = st.sidebar.selectbox(
+    "Wilderness Area", options=[0, 1, 2, 3]
+)
+
+soil_type = st.sidebar.selectbox(
+    "Soil Type", options=list(range(0, 40))
+)
+
+# -------------------------------
+# Prediction Button
+# -------------------------------
+st.markdown("### 🔍 Prediction Result")
+
+if st.button("Predict Forest Cover Type"):
+    input_data = np.array([[
+        elevation,
+        aspect,
+        slope,
+        h_dist_hydro,
+        v_dist_hydro,
+        h_dist_road,
+        hillshade_9am,
+        hillshade_noon,
+        hillshade_3pm,
+        h_dist_fire,
+        wilderness_area,
+        soil_type
+    ]])
+
+    # Scale input
+    input_scaled = scaler.transform(input_data)
+
+    # Predict class
+    pred_encoded = model.predict(input_scaled)
+    pred_label = label_encoder.inverse_transform(pred_encoded)[0]
+
+    # Predict probabilities
+    probs = model.predict_proba(input_scaled)[0]
+
+    # Display result
+    st.success(f"🌳 **Predicted Forest Cover Type:** {pred_label}")
+
+    # Probability table
+    prob_df = pd.DataFrame({
+        "Cover Type": label_encoder.classes_,
+        "Probability": probs
+    }).sort_values(by="Probability", ascending=False)
+
+    st.markdown("### 📊 Prediction Confidence")
+    st.dataframe(prob_df, use_container_width=True)
+
+# -------------------------------
+# Footer
+# -------------------------------
+st.markdown("---")
+st.caption(
+    "Model: Tuned XGBoost | Preprocessing: StandardScaler | SMOTE applied during training only"
+)
+
+!streamlit run /content/app.py &>/content/logs.txt & 
+
+!grep -o 'https://.*\.trycloudflare.com' nohup.out | head -n 1 | xargs -I {} echo "Your tunnel url {}"
